@@ -1,11 +1,17 @@
 /* eslint-disable max-len */
 /* eslint-disable jsx-a11y/label-has-associated-control */
 /* eslint-disable jsx-a11y/control-has-associated-label */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Todo } from './types/Todo';
-import { client } from './utils/fetchClient';
 import { UserWarning } from './UserWarning';
-import { USER_ID } from './api/todos';
+import {
+  deleteTodos,
+  getTodos,
+  patchTodos,
+  postTodos,
+  USER_ID,
+} from './api/todos';
+import { Loader } from './utils/loader';
 
 export const App: React.FC = () => {
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -18,12 +24,23 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     setLoading(true);
-    client
-      .get<Todo[]>('/todos')
+
+    getTodos()
       .then(setTodos)
-      .catch(() => setErrorMsg('Unable to load todos'))
+      .catch(() => {
+        setErrorMsg('Unable to load todos');
+        setTimeout(() => setErrorMsg(null), 3000);
+      })
       .finally(() => setLoading(false));
   }, []);
+
+  const editInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (editingTodo !== null && editInputRef.current) {
+      editInputRef.current.focus();
+    }
+  }, [editingTodo]);
 
   if (!USER_ID) {
     return <UserWarning />;
@@ -41,9 +58,9 @@ export const App: React.FC = () => {
 
     setTodos(updatedTodos);
     updatedTodos.forEach(todo => {
-      client
-        .patch<Todo>(`/todos/${todo.id}`, { completed: newCompletedState })
-        .catch(() => setErrorMsg('Unable to update todos'));
+      patchTodos(todo.id, { completed: newCompletedState }).catch(() =>
+        setErrorMsg('Unable to update todos'),
+      );
     });
   };
 
@@ -57,12 +74,15 @@ export const App: React.FC = () => {
 
     const newTodo = { title: newTodoTitle, completed: false };
 
+    setErrorMsg(null);
     setLoading(true);
 
-    client
-      .post<Todo>('/todos', newTodo)
+    postTodos(newTodo)
       .then(createdTodo => setTodos([...todos, createdTodo]))
-      .catch(() => setErrorMsg('Unable to add a todo'))
+      .catch(() => {
+        setErrorMsg('Unable to add todos');
+        setTimeout(() => setErrorMsg(null), 3000);
+      })
       .finally(() => {
         setLoading(false);
         setNewTodoTitle('');
@@ -72,19 +92,23 @@ export const App: React.FC = () => {
   const handleToggleComplete = (todo: Todo) => {
     const updatedTodo = { ...todo, completed: !todo.completed };
 
-    client
-      .patch<Todo>(`/todos/${todo.id}`, updatedTodo)
+    patchTodos(todo.id, updatedTodo)
       .then(() =>
         setTodos(todos.map(t => (t.id === todo.id ? updatedTodo : t))),
       )
-      .catch(() => setErrorMsg('Unable to update a todo'));
+      .catch(() => {
+        setErrorMsg('Unable to update todos');
+        setTimeout(() => setErrorMsg(null), 3000);
+      });
   };
 
   const handleDeleteTodo = (id: number) => {
-    client
-      .delete(`/todos/${id}`)
+    deleteTodos(id)
       .then(() => setTodos(todos.filter(todo => todo.id !== id)))
-      .catch(() => setErrorMsg('Unable to delete a todo'));
+      .catch(() => {
+        setErrorMsg('Unable to delete todos');
+        setTimeout(() => setErrorMsg(null), 3000);
+      });
   };
 
   const handleEditTodo = (id: number, title: string) => {
@@ -101,13 +125,15 @@ export const App: React.FC = () => {
 
     const updatedTodo = { ...todo, title: editingTitle };
 
-    client
-      .patch<Todo>(`/todos/${todo.id}`, updatedTodo)
+    patchTodos(todo.id, updatedTodo)
       .then(() => {
         setTodos(todos.map(t => (t.id === todo.id ? updatedTodo : t)));
         setEditingTodo(null);
       })
-      .catch(() => setErrorMsg('Unable to update a todo'));
+      .catch(() => {
+        setErrorMsg('Unable to update todos');
+        setTimeout(() => setErrorMsg(null), 3000);
+      });
   };
 
   const filteredTodos = todos.filter(todo => {
@@ -119,19 +145,18 @@ export const App: React.FC = () => {
       return todo.completed;
     }
 
-    return true; // 'all' mostra todas
+    return true;
   });
 
   const handleClearCompleted = () => {
     const completedTodos = todos.filter(todo => todo.completed);
 
-    completedTodos.forEach(todo => {
-      client
-        .delete(`/todos/${todo.id}`)
-        .catch(() => setErrorMsg('Unable to delete a todo'));
-    });
-
-    setTodos(todos.filter(todo => !todo.completed));
+    Promise.all(completedTodos.map(todo => deleteTodos(todo.id)))
+      .then(() => setTodos(todos.filter(todo => !todo.completed)))
+      .catch(() => {
+        setErrorMsg('Unable to delete completed todos');
+        setTimeout(() => setErrorMsg(null), 3000);
+      });
   };
 
   const activeTodosCount = todos.filter(todo => !todo.completed).length;
@@ -153,6 +178,7 @@ export const App: React.FC = () => {
           {/* Add a todo on form submit */}
           <form onSubmit={handleAddTodo}>
             <input
+              ref={editInputRef}
               data-cy="NewTodoField"
               type="text"
               className="todoapp__new-todo"
@@ -163,7 +189,7 @@ export const App: React.FC = () => {
           </form>
         </header>
 
-        {loading && <p>Loading...</p>}
+        {loading && <Loader />}
 
         <section className="todoapp__main" data-cy="TodoList">
           {/* This is a completed todo */}
@@ -197,7 +223,7 @@ export const App: React.FC = () => {
                     placeholder="Empty todo will be deleted"
                     value={editingTitle}
                     onChange={e => setEditingTitle(e.target.value)}
-                    onBlur={() => handleSaveEdit(todo)} // Salvar quando o usuário sair do campo
+                    onBlur={() => handleSaveEdit(todo)}
                   />
                 </form>
               ) : (
@@ -205,7 +231,7 @@ export const App: React.FC = () => {
                   <span
                     data-cy="TodoTitle"
                     className="todo__title"
-                    onDoubleClick={() => handleEditTodo(todo.id, todo.title)} // Duplo clique para editar
+                    onDoubleClick={() => handleEditTodo(todo.id, todo.title)}
                   >
                     {todo.title}
                   </span>
@@ -283,20 +309,20 @@ export const App: React.FC = () => {
 
       {/* DON'T use conditional rendering to hide the notification */}
       {/* Add the 'hidden' class to hide the message smoothly */}
-      {errorMsg && (
-        <div
-          data-cy="ErrorNotification"
-          className="notification is-danger is-light has-text-weight-normal"
-        >
-          <button
-            data-cy="HideErrorButton"
-            type="button"
-            className="delete"
-            onClick={() => setErrorMsg(null)} // Fecha o erro ao clicar no botão
-          />
-          {errorMsg}
-        </div>
-      )}
+      <div
+        data-cy="ErrorNotification"
+        className={`notification is-danger is-light has-text-weight-normal ${
+          errorMsg ? '' : 'hidden'
+        }`}
+      >
+        <button
+          data-cy="HideErrorButton"
+          type="button"
+          className="delete"
+          onClick={() => setErrorMsg(null)}
+        />
+        {errorMsg}
+      </div>
     </div>
   );
 };
